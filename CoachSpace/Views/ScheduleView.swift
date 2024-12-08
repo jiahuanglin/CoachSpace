@@ -3,6 +3,10 @@ import SwiftUI
 struct ScheduleView: View {
     @State private var selectedTab = 0
     @State private var selectedDate = Date()
+    @State private var upcomingClasses: [Class] = []
+    @State private var pastClasses: [Class] = []
+    @State private var isLoading = false
+    @State private var error: Error?
     private let calendar = Calendar.current
     
     var body: some View {
@@ -32,50 +36,119 @@ struct ScheduleView: View {
                 .pickerStyle(.segmented)
                 .padding()
                 
-                if selectedTab == 0 {
-                    UpcomingClassesView()
+                if isLoading {
+                    ProgressView()
+                        .frame(maxHeight: .infinity)
+                } else if let error = error {
+                    VStack(spacing: 16) {
+                        Text("Error loading schedule")
+                            .font(.headline)
+                        Text(error.localizedDescription)
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") {
+                            Task {
+                                await loadClasses()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding()
+                    .frame(maxHeight: .infinity)
                 } else {
-                    PastClassesView()
+                    if selectedTab == 0 {
+                        UpcomingClassesView(classes: upcomingClasses)
+                    } else {
+                        PastClassesView(classes: pastClasses)
+                    }
                 }
             }
             .navigationTitle("Schedule")
             .background(Color(.systemGray6))
         }
+        .task {
+            await loadClasses()
+        }
+    }
+    
+    private func loadClasses() async {
+        isLoading = true
+        error = nil
+        
+        do {
+            let userId = AuthService.shared.currentUser?.id ?? ""
+            async let upcoming = ClassService.shared.getUpcomingClasses(for: userId)
+            async let past = ClassService.shared.getPastClasses(for: userId)
+            
+            let (upcomingResult, pastResult) = try await (upcoming, past)
+            upcomingClasses = upcomingResult
+            pastClasses = pastResult
+        } catch {
+            self.error = error
+        }
+        
+        isLoading = false
     }
 }
 
 struct UpcomingClassesView: View {
+    let classes: [Class]
+    
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
-                ForEach(0..<5) { index in
-                    UpcomingClassCard(
-                        showBookingStatus: index == 0,
-                        showPaymentStatus: index == 1
-                    )
+        if classes.isEmpty {
+            ContentUnavailableView(
+                "No Upcoming Classes",
+                systemImage: "calendar.badge.plus",
+                description: Text("Book a class to get started!")
+            )
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    ForEach(classes) { classItem in
+                        UpcomingClassCard(
+                            classItem: classItem,
+                            showBookingStatus: true
+                        )
+                    }
                 }
+                .padding()
             }
-            .padding()
         }
     }
 }
 
 struct PastClassesView: View {
+    let classes: [Class]
+    
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
-                ForEach(0..<10) { _ in
-                    PastClassCard()
+        if classes.isEmpty {
+            ContentUnavailableView(
+                "No Past Classes",
+                systemImage: "calendar.badge.clock",
+                description: Text("Your completed classes will appear here")
+            )
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    ForEach(classes) { classItem in
+                        PastClassCard(classItem: classItem)
+                    }
                 }
+                .padding()
             }
-            .padding()
         }
     }
 }
 
 struct UpcomingClassCard: View {
+    let classItem: Class
     var showBookingStatus: Bool = false
-    var showPaymentStatus: Bool = false
+    @State private var venue: Venue?
+    @State private var instructor: User?
+    @State private var showingCancelAlert = false
+    @State private var isCancelling = false
+    @State private var error: Error?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -83,10 +156,10 @@ struct UpcomingClassCard: View {
             HStack(spacing: 16) {
                 // Time Column
                 VStack(spacing: 4) {
-                    Text("9:30")
+                    Text(classItem.startTime.formatted(date: .omitted, time: .shortened))
                         .font(.title3)
                         .fontWeight(.bold)
-                    Text("AM")
+                    Text(classItem.startTime.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
@@ -94,27 +167,29 @@ struct UpcomingClassCard: View {
                 
                 // Class Info
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Advanced Snowboarding")
+                    Text(classItem.name)
                         .font(.headline)
                     
-                    HStack {
-                        Image(systemName: "person.circle.fill")
-                            .foregroundColor(.gray)
-                        Text("Mike Wilson")
-                            .foregroundColor(.gray)
+                    if let instructor = instructor {
+                        HStack {
+                            Image(systemName: "person.circle.fill")
+                                .foregroundColor(.gray)
+                            Text(instructor.displayName)
+                                .foregroundColor(.gray)
+                        }
+                        .font(.subheadline)
                     }
-                    .font(.subheadline)
                     
                     HStack {
-                        StatusTag(text: "2h", icon: "clock.fill")
-                        StatusTag(text: "Intermediate", icon: "speedometer")
+                        StatusTag(text: "\(classItem.duration)m", icon: "clock.fill")
+                        StatusTag(text: classItem.level.rawValue, icon: "speedometer")
                     }
                 }
                 
                 Spacer()
                 
                 // Action Button
-                Button(action: {}) {
+                NavigationLink(destination: ClassDetailView(classId: classItem.id)) {
                     Image(systemName: "chevron.right")
                         .foregroundColor(.gray)
                 }
@@ -129,46 +204,94 @@ struct UpcomingClassCard: View {
                     icon: "checkmark.circle.fill",
                     color: .green
                 )
-            } else if showPaymentStatus {
-                StatusBar(
-                    text: "Payment Pending",
-                    icon: "exclamationmark.circle.fill",
-                    color: .orange
-                )
             }
         }
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5)
+        .alert("Cancel Booking", isPresented: $showingCancelAlert) {
+            Button("Cancel Booking", role: .destructive) {
+                Task {
+                    await cancelBooking()
+                }
+            }
+            Button("Keep Booking", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to cancel this booking? This action cannot be undone.")
+        }
+        .alert("Error", isPresented: .init(
+            get: { error != nil },
+            set: { if !$0 { error = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let error = error {
+                Text(error.localizedDescription)
+            }
+        }
+        .task {
+            do {
+                async let venueResult = VenueService.shared.getVenue(id: classItem.venueId)
+                async let instructorResult = UserService.shared.getUser(id: classItem.instructorId)
+                
+                let (venue, instructor) = try await (venueResult, instructorResult)
+                self.venue = venue
+                self.instructor = instructor
+            } catch {
+                self.error = error
+            }
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                showingCancelAlert = true
+            } label: {
+                Label("Cancel Booking", systemImage: "xmark.circle")
+            }
+        }
+    }
+    
+    private func cancelBooking() async {
+        isCancelling = true
+        do {
+            let userId = AuthService.shared.currentUser?.id ?? ""
+            try await ClassService.shared.cancelBooking(classId: classItem.id, userId: userId)
+            NotificationCenter.default.post(name: .ClassCancelled, object: nil)
+        } catch {
+            self.error = error
+        }
+        isCancelling = false
     }
 }
 
 struct PastClassCard: View {
+    let classItem: Class
+    @State private var instructor: User?
+    @State private var error: Error?
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 16) {
                 // Class Image
-                Image("class_image")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                if !classItem.imageURL.isEmpty {
+                    AsyncImage(url: URL(string: classItem.imageURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                    }
                     .frame(width: 80, height: 80)
                     .cornerRadius(12)
+                }
                 
                 // Class Info
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Advanced Snowboarding")
+                    Text(classItem.name)
                         .font(.headline)
                     
-                    Text("with Mike Wilson")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                    
-                    HStack {
-                        ForEach(0..<5) { index in
-                            Image(systemName: "star.fill")
-                                .foregroundColor(index < 4 ? .yellow : .gray)
-                        }
-                        Text("4.0")
-                            .font(.caption)
+                    if let instructor = instructor {
+                        Text("with \(instructor.displayName)")
+                            .font(.subheadline)
                             .foregroundColor(.gray)
                     }
                 }
@@ -177,12 +300,12 @@ struct PastClassCard: View {
                 
                 // Date
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("Dec 1")
+                    Text(classItem.startTime.formatted(date: .abbreviated, time: .omitted))
                         .font(.subheadline)
                         .foregroundColor(.gray)
                     
-                    Button(action: {}) {
-                        Text("Review")
+                    NavigationLink(destination: ClassDetailView(classId: classItem.id)) {
+                        Text("Details")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.blue)
@@ -197,6 +320,32 @@ struct PastClassCard: View {
             .background(Color(.systemBackground))
             .cornerRadius(16)
         }
+        .task {
+            do {
+                let instructor = try await UserService.shared.getUser(id: classItem.instructorId)
+                self.instructor = instructor
+            } catch {
+                self.error = error
+            }
+        }
+    }
+}
+
+struct StatusTag: View {
+    let text: String
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text)
+        }
+        .font(.caption)
+        .foregroundColor(.gray)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
     }
 }
 
@@ -216,24 +365,6 @@ struct StatusBar: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(color.opacity(0.1))
-    }
-}
-
-struct StatusTag: View {
-    let text: String
-    let icon: String
-    
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text(text)
-        }
-        .font(.caption)
-        .foregroundColor(.gray)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
     }
 }
 

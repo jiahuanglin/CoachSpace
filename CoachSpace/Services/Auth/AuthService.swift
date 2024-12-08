@@ -18,6 +18,10 @@ final class AuthService: AuthServiceProtocol {
     private let auth = Auth.auth()
     private let userService = UserService.shared
     
+    var currentUser: User? {
+        getCurrentUser()
+    }
+    
     private init() {}
     
     var authStatePublisher: AnyPublisher<User?, Never> {

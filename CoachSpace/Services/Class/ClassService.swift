@@ -17,7 +17,7 @@ protocol ClassServiceProtocol {
     func cancelBooking(classId: String, userId: String) async throws
     func getClassParticipants(classId: String) async throws -> [User]
     func addClassReview(classId: String, userId: String, rating: Int, comment: String) async throws
-    func getClassReviews(classId: String) async throws -> [ClassReview]
+    func getClassReviews(classId: String) async throws -> [Review]
 }
 
 final class ClassService: ClassServiceProtocol {
@@ -54,16 +54,13 @@ final class ClassService: ClassServiceProtocol {
     
     func deleteClass(_ classId: String) async throws {
         do {
-            // Delete class data
             try await db.collection("classes").document(classId).delete()
             
-            // Delete class image if exists
             if let classData = try await getClass(id: classId),
                !classData.imageURL.isEmpty {
                 try await storage.deleteImage(at: classData.imageURL)
             }
             
-            // Delete related data (bookings, reviews, etc.)
             try await cleanupClassData(classId)
         } catch {
             throw ClassError.deleteFailed(error)
@@ -107,7 +104,7 @@ final class ClassService: ClassServiceProtocol {
         do {
             let bookings = try await db.collection("bookings")
                 .whereField("userId", isEqualTo: userId)
-                .whereField("startTime", isGreaterThan: Date())
+                .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
             let classIds = bookings.documents.compactMap { $0.data()["classId"] as? String }
@@ -121,11 +118,12 @@ final class ClassService: ClassServiceProtocol {
         do {
             let bookings = try await db.collection("bookings")
                 .whereField("userId", isEqualTo: userId)
-                .whereField("startTime", isLessThan: Date())
+                .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
             let classIds = bookings.documents.compactMap { $0.data()["classId"] as? String }
-            return try await getClassesById(classIds)
+            let classes = try await getClassesById(classIds)
+            return classes.filter { $0.startTime < Date() }
         } catch {
             throw ClassError.fetchFailed(error)
         }
@@ -163,19 +161,16 @@ final class ClassService: ClassServiceProtocol {
                 throw ClassError.classFull
             }
             
-            // Create booking
-            let bookingId = UUID().uuidString
-            let booking: [String: Any] = [
-                "id": bookingId,
-                "classId": classId,
-                "userId": userId,
-                "status": "confirmed",
-                "createdAt": FieldValue.serverTimestamp()
-            ]
+            let booking = Booking(
+                id: UUID().uuidString,
+                classId: classId,
+                userId: userId,
+                status: .confirmed,
+                createdAt: Date()
+            )
             
-            try await db.collection("bookings").document(bookingId).setData(booking)
+            try await db.collection("bookings").document(booking.id).setData(booking.toFirestore)
             
-            // Update class participants count
             try await db.collection("classes").document(classId).updateData([
                 "currentParticipants": FieldValue.increment(Int64(1))
             ])
@@ -195,6 +190,7 @@ final class ClassService: ClassServiceProtocol {
             let bookings = try await db.collection("bookings")
                 .whereField("classId", isEqualTo: classId)
                 .whereField("userId", isEqualTo: userId)
+                .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
             guard let booking = bookings.documents.first else {
@@ -221,6 +217,7 @@ final class ClassService: ClassServiceProtocol {
         do {
             let bookings = try await db.collection("bookings")
                 .whereField("classId", isEqualTo: classId)
+                .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
             let userIds = bookings.documents.compactMap { $0.data()["userId"] as? String }
@@ -232,9 +229,8 @@ final class ClassService: ClassServiceProtocol {
     
     func addClassReview(classId: String, userId: String, rating: Int, comment: String) async throws {
         do {
-            let reviewId = UUID().uuidString
-            let review = ClassReview(
-                id: reviewId,
+            let review = Review(
+                id: UUID().uuidString,
                 classId: classId,
                 userId: userId,
                 rating: rating,
@@ -242,7 +238,7 @@ final class ClassService: ClassServiceProtocol {
                 createdAt: Date()
             )
             
-            try await db.collection("reviews").document(reviewId).setData(review.toFirestore)
+            try await db.collection("reviews").document(review.id).setData(review.toFirestore)
             
             NotificationCenter.default.post(
                 name: .ClassReviewAdded,
@@ -254,19 +250,17 @@ final class ClassService: ClassServiceProtocol {
         }
     }
     
-    func getClassReviews(classId: String) async throws -> [ClassReview] {
+    func getClassReviews(classId: String) async throws -> [Review] {
         do {
             let snapshot = try await db.collection("reviews")
                 .whereField("classId", isEqualTo: classId)
                 .order(by: "createdAt", descending: true)
                 .getDocuments()
-            return snapshot.documents.compactMap { ClassReview.from($0) }
+            return snapshot.documents.compactMap { Review.from($0) }
         } catch {
             throw ClassError.fetchFailed(error)
         }
     }
-    
-    // MARK: - Private Methods
     
     private func getClassesById(_ ids: [String]) async throws -> [Class] {
         var classes: [Class] = []
@@ -289,7 +283,6 @@ final class ClassService: ClassServiceProtocol {
     }
     
     private func cleanupClassData(_ classId: String) async throws {
-        // Delete bookings
         let bookings = try await db.collection("bookings")
             .whereField("classId", isEqualTo: classId)
             .getDocuments()
@@ -298,7 +291,6 @@ final class ClassService: ClassServiceProtocol {
             try await booking.reference.delete()
         }
         
-        // Delete reviews
         let reviews = try await db.collection("reviews")
             .whereField("classId", isEqualTo: classId)
             .getDocuments()
@@ -309,30 +301,7 @@ final class ClassService: ClassServiceProtocol {
     }
 }
 
-// MARK: - Types
-
-struct ClassReview: Codable {
-    let id: String
-    let classId: String
-    let userId: String
-    let rating: Int
-    let comment: String
-    let createdAt: Date
-}
-
-extension ClassReview {
-    static func from(_ document: DocumentSnapshot) -> ClassReview? {
-        try? document.data(as: ClassReview.self)
-    }
-    
-    var toFirestore: [String: Any] {
-        guard let data = try? Firestore.Encoder().encode(self) else { return [:] }
-        return data
-    }
-}
-
 // MARK: - Errors
-
 enum ClassError: LocalizedError {
     case fetchFailed(Error)
     case createFailed(Error)
@@ -364,7 +333,6 @@ enum ClassError: LocalizedError {
 }
 
 // MARK: - Notifications
-
 extension Notification.Name {
     static let ClassBooked = Notification.Name("ClassBooked")
     static let ClassCancelled = Notification.Name("ClassCancelled")
