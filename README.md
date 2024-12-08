@@ -1,224 +1,276 @@
 # CoachSpace
 
-A winter sports class booking application that connects students with instructors for snowboarding and skiing lessons.
+CoachSpace is an iOS application that connects students with instructors for sports classes, featuring real-time messaging, class scheduling, and progress tracking.
 
-## Features
+## Prerequisites
 
-- Browse and book snowboard/ski classes
-- Real-time messaging with instructors
-- Track learning progress
-- View class schedules and instructor details
-- Manage bookings and payments
-- Progress tracking and achievements
-
-## Requirements
-
-- iOS 15.0+
 - Xcode 14.0+
-- Swift 5.0+
+- iOS 15.0+
+- Swift 5.5+
 - CocoaPods or Swift Package Manager
-- Firebase project
+- Firebase CLI tools
+- Node.js 14+ (for Firebase Emulator)
 
-## Setup
+## Local Development Setup
 
-### 1. Clone the Repository
+1. Clone the repository:
 
 ```bash
 git clone https://github.com/yourusername/CoachSpace.git
 cd CoachSpace
 ```
 
-### 2. Firebase Setup
-
-#### 1. Create Firebase Project
-1. Go to [Firebase Console](https://console.firebase.google.com)
-2. Create a new project or select an existing one
-3. Add an iOS app:
-   - Bundle ID: `com.yourcompany.CoachSpace`
-   - App nickname: `CoachSpace`
-   - App Store ID: (optional)
-
-#### 2. Configure Firebase in Xcode
-
-1. Download `GoogleService-Info.plist`:
-   - Download from Firebase Console
-   - Add to Xcode project (drag & drop)
-   - Make sure "Copy items if needed" is checked
-   - Add to all targets that need Firebase
-
-2. Add Firebase SDK using Swift Package Manager:
-   ```
-   File > Add Packages...
-   Search: https://github.com/firebase/firebase-ios-sdk.git
-   ```
-
-3. Select the following Firebase products:
-   - FirebaseAnalytics
-   - FirebaseAuth
-   - FirebaseFirestore
-   - FirebaseStorage
-   - FirebaseMessaging
-
-4. Update your target's minimum deployment target to iOS 13.0 or later
-
-5. Initialize Firebase in your app:
-   ```swift
-   import FirebaseCore
-   
-   class AppDelegate: NSObject, UIApplicationDelegate {
-       func application(_ application: UIApplication,
-                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-           do {
-               try FirebaseConfig.shared.configure()
-           } catch {
-               print("Firebase configuration failed: \(error)")
-           }
-           return true
-       }
-   }
-   ```
-
-#### 3. Enable Firebase Services
-
-1. Authentication:
-   - Go to Authentication > Sign-in method
-   - Enable Email/Password
-   - Add other providers as needed
-
-2. Firestore Database:
-   - Create database in test mode
-   - Set up security rules
-   - Create indexes for queries
-
-3. Storage:
-   - Set up security rules
-   - Configure CORS if needed
-
-#### 4. Local Development
-
-1. Install Firebase CLI:
-   ```bash
-   npm install -g firebase-tools
-   ```
-
-2. Login and initialize:
-   ```bash
-   firebase login
-   firebase init
-   ```
-
-3. Start emulators:
-   ```bash
-   firebase emulators:start
-   ```
-
-#### 5. Database Schema Setup
-
-Run the following commands in your terminal to set up the Firestore security rules and indexes:
+2. Install dependencies:
 
 ```bash
-firebase login
-firebase init firestore
-firebase deploy --only firestore:rules,firestore:indexes
+pod install
+# or if using SPM, Xcode will handle this automatically
 ```
 
-## Development
+3. Set up Firebase:
+   - Create a new Firebase project at [Firebase Console](https://console.firebase.google.com)
+   - Download `GoogleService-Info.plist` and add it to your Xcode project
+   - Enable Authentication, Firestore, and Storage in Firebase Console
 
-### Building the Project
+4. Install and configure Firebase emulators:
 
-1. Open `CoachSpace.xcodeproj` in Xcode
-2. Select your target device/simulator
-3. Build (⌘B) and Run (⌘R)
+```bash
+# Install Firebase CLI
+npm install -g firebase-tools
 
-### Testing
+# Login to Firebase
+firebase login
 
-1. Unit Tests: ⌘U to run all tests
-2. UI Tests: Select the UI Test target and run ⌘U
+# Initialize Firebase project
+firebase init
 
-### Deployment
+# Select the following features:
+# - Firestore Emulator
+# - Authentication Emulator
+# - Storage Emulator
 
-1. Configure your signing certificate in Xcode
-2. Update version and build numbers
-3. Archive and upload to App Store Connect
+# Start emulators
+firebase emulators:start
+```
 
-## Architecture
+5. Configure local environment:
+   - Create a new scheme in Xcode for local development
+   - Add environment variables:
+     ```
+     FIRESTORE_EMULATOR_HOST=localhost:8080
+     FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
+     FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199
+     ```
 
-The app follows the MVVM (Model-View-ViewModel) architecture pattern with the following components:
+## Development Workflow
 
-- **Models**: Data structures and business logic
-- **Views**: SwiftUI views and UI components
-- **ViewModels**: Business logic and data transformation
-- **Services**: Firebase and API integrations
+### Running the App Locally
 
-### Directory Structure
+1. Start Firebase emulators:
+
+```bash
+firebase emulators:start
+```
+
+2. In Xcode:
+   - Select the "Local Development" scheme
+   - Choose your target device/simulator
+   - Run the app (⌘R)
+
+3. Verify emulator connection:
+   - Check Xcode console for emulator connection messages
+   - Use Firebase Emulator UI (http://localhost:4000) to monitor requests
+
+### Database Setup
+
+1. Initialize Firestore with test data:
+
+```bash
+# From project root
+./scripts/init-test-data.sh
+```
+
+2. Monitor database:
+   - Open Firebase Emulator UI: http://localhost:4000
+   - Navigate to Firestore tab
+   - View real-time updates
+
+## Testing
+
+### Setting Up Test Environment
+
+1. Configure test Firebase project:
+   - Create a separate Firebase project for testing
+   - Update `FirebaseTestSetup.swift` with test credentials:
+   ```swift
+   let options = FirebaseOptions(
+       googleAppID: "test-app-id",
+       gcmSenderID: "test-sender-id"
+   )
+   options.projectID = "test-project-id"
+   options.apiKey = "test-api-key"
+   ```
+
+2. Start emulators in test mode:
+
+```bash
+firebase emulators:start --only firestore,auth,storage
+```
+
+### Running Tests
+
+1. Unit Tests in Xcode:
+   ```
+   # Run all tests
+   ⌘U
+
+   # Run specific test
+   Control + Option + ⌘U (select test)
+   ```
+
+2. Command Line Testing:
+
+```bash
+# Run all tests
+xcodebuild test \
+  -workspace CoachSpace.xcworkspace \
+  -scheme CoachSpace \
+  -destination 'platform=iOS Simulator,name=iPhone 14' \
+  -enableCodeCoverage YES
+
+# Run specific test class
+xcodebuild test \
+  -workspace CoachSpace.xcworkspace \
+  -scheme CoachSpace \
+  -destination 'platform=iOS Simulator,name=iPhone 14' \
+  -only-testing:CoachSpaceTests/MessagingServiceTests
+```
+
+3. Continuous Integration:
+
+```bash
+# Install dependencies
+bundle install
+
+# Run tests with Fastlane
+bundle exec fastlane test
+```
+
+### Test Coverage
+
+1. Generate coverage report:
+
+```bash
+xcodebuild test \
+  -workspace CoachSpace.xcworkspace \
+  -scheme CoachSpace \
+  -destination 'platform=iOS Simulator,name=iPhone 14' \
+  -enableCodeCoverage YES \
+  -resultBundlePath TestResults.xcresult
+
+# Convert to HTML report
+xcrun xccov view --report TestResults.xcresult
+```
+
+2. View in Xcode:
+   - Open Report navigator (⌘9)
+   - Select latest test run
+   - Click Coverage tab
+
+## Deployment
+
+### Development
+
+1. Configure development environment:
+   - Update `GoogleService-Info.plist` with dev credentials
+   - Set up dev provisioning profile
+   - Use dev Firebase instance
+
+2. Deploy to TestFlight:
+
+```bash
+bundle exec fastlane beta
+```
+
+### Production
+
+1. Pre-deployment checklist:
+   - Update version/build numbers
+   - Run full test suite
+   - Check analytics integration
+   - Verify production credentials
+
+2. Deploy to App Store:
+
+```bash
+bundle exec fastlane release
+```
+
+3. Post-deployment:
+   - Monitor crash reports
+   - Check analytics
+   - Verify production database
+
+## Project Structure
 
 ```
 CoachSpace/
-├── Models/
-│   ├── Class.swift
-│   ├── Instructor.swift
-│   ├── Venue.swift
-│   ├── Message.swift
-│   └── User.swift
-├── Views/
-│   ├── Home/
-│   ├── Schedule/
-│   ├── Progress/
-│   ├── Messages/
-│   └── Profile/
-├── ViewModels/
-├── Services/
-│   ├── Auth/
-│   │   └── AuthService.swift
-│   ├── User/
-│   │   └── UserService.swift
-│   ├── Storage/
-│   │   └── StorageService.swift
-│   ├── Class/
-│   │   └── ClassService.swift
-│   ├── Messaging/
-│   │   └── MessagingService.swift
-│   └── Venue/
-│       └── VenueService.swift
-└── Configuration/
-    └── Firebase/
+├── App/                # App entry point and configuration
+├── Services/           # Core services and API clients
+│   ├── Messaging/     # Real-time messaging
+│   ├── Class/         # Class management
+│   └── User/          # User management
+├── Models/            # Data models
+├── Views/             # SwiftUI views
+├── ViewModels/        # View models
+├── Tests/             # Test files
+│   ├── Unit/         # Unit tests
+│   ├── Integration/  # Integration tests
+│   └── Mocks/        # Test mocks and stubs
+└── Resources/         # Assets and configuration files
 ```
 
-## Firebase Collections
+## Contributing
 
-### Users
-```json
-{
-  "users": {
-    "userId": {
-      "email": "string",
-      "displayName": "string",
-      "role": "string",
-      "preferences": {
-        "categories": ["string"],
-        "levels": ["string"]
-      }
-    }
-  }
-}
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## Troubleshooting
+
+### Common Issues
+
+1. Emulator Connection:
+
+```bash
+# Reset emulator
+firebase emulators:stop
+firebase emulators:start --clear-data
+
+# Check ports
+lsof -i :8080  # Firestore
+lsof -i :9099  # Auth
+lsof -i :9199  # Storage
 ```
 
-### Classes
-```json
-{
-  "classes": {
-    "classId": {
-      "name": "string",
-      "instructorId": "string",
-      "category": "string",
-      "level": "string",
-      "startTime": "timestamp",
-      "duration": "number"
-    }
-  }
-}
+2. Test Failures:
+
+```bash
+# Clean build
+xcodebuild clean
+
+# Reset simulator
+xcrun simctl erase all
 ```
+
+### Getting Help
+
+- Check Firebase logs in Emulator UI
+- Review Xcode Console output
+- File an issue on GitHub
 
 ## License
 
-This project is available under the MIT license. 
+This project is licensed under the MIT License - see the LICENSE file for details 
