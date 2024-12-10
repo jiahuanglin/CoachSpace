@@ -2,11 +2,47 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is accessing their own data
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Users collection rules
     match /users/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || resource.data.role == 'instructor');
-      allow create: if request.auth != null;
-      allow update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      // Allow users to read and write their own data
+      allow read, write: if isOwner(userId);
+      
+      // Allow reading instructor profiles
+      allow read: if isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(userId)).data.role == 'instructor';
+    }
+    
+    // Classes collection rules
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'instructor';
+    }
+    
+    // Bookings collection rules
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'instructor');
+    }
+    
+    // Reviews collection rules
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
   }
 } 

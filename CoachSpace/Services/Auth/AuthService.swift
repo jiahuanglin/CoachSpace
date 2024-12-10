@@ -13,16 +13,104 @@ protocol AuthServiceProtocol {
     var authStatePublisher: AnyPublisher<User?, Never> { get }
 }
 
-final class AuthService: AuthServiceProtocol {
+@MainActor
+final class AuthService: ObservableObject, AuthServiceProtocol {
     static let shared = AuthService()
     private let auth = Auth.auth()
     private let userService = UserService.shared
     
-    var currentUser: User? {
-        getCurrentUser()
+    @Published var currentUser: User?
+    @Published var isAuthenticated: Bool = false
+    @Published var isLoading: Bool = true
+    
+    private init() {
+        setupAuthStateListener()
+        checkInitialAuthState()
     }
     
-    private init() {}
+    private func checkInitialAuthState() {
+        if let firebaseUser = auth.currentUser {
+            Task {
+                isLoading = true
+                if let user = try? await userService.getUser(id: firebaseUser.uid) {
+                    currentUser = user
+                    isAuthenticated = true
+                }
+                isLoading = false
+            }
+        } else {
+            isLoading = false
+        }
+    }
+    
+    private func setupAuthStateListener() {
+        auth.addStateDidChangeListener { [weak self] _, user in
+            Task {
+                if let user = user {
+                    self?.isLoading = true
+                    if let userData = try? await self?.userService.getUser(id: user.uid) {
+                        self?.currentUser = userData
+                        self?.isAuthenticated = true
+                    } else {
+                        // If we can't get user data, create a placeholder
+                        self?.currentUser = self?.createPlaceholderUser(from: user)
+                        self?.isAuthenticated = true
+                    }
+                    self?.isLoading = false
+                } else {
+                    self?.currentUser = nil
+                    self?.isAuthenticated = false
+                    self?.isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func createPlaceholderUser(from firebaseUser: FirebaseAuth.User) -> User {
+        User(
+            id: firebaseUser.uid,
+            email: firebaseUser.email ?? "",
+            displayName: firebaseUser.displayName ?? "User",
+            phoneNumber: firebaseUser.phoneNumber,
+            imageURL: firebaseUser.photoURL?.absoluteString,
+            role: .student,
+            preferences: .init(
+                preferredCategories: [],
+                preferredLevels: [],
+                preferredInstructors: [],
+                preferredVenues: [],
+                equipment: .init(
+                    hasOwnEquipment: false,
+                    equipmentDetails: [],
+                    preferredRentalLocation: nil
+                ),
+                notifications: .init(
+                    classReminders: true,
+                    promotions: true,
+                    messages: true,
+                    email: true,
+                    push: true,
+                    sms: false
+                )
+            ),
+            stats: .init(
+                totalClasses: 0,
+                totalHours: 0,
+                averageRating: 0,
+                skillLevels: [],
+                achievements: []
+            ),
+            settings: .init(
+                language: Locale.current.language.languageCode?.identifier ?? "en",
+                timezone: TimeZone.current.identifier,
+                currency: Locale.current.currency?.identifier ?? "USD",
+                measurementSystem: .metric
+            ),
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
     
     var authStatePublisher: AnyPublisher<User?, Never> {
         NotificationCenter.default.publisher(for: .AuthStateDidChange)

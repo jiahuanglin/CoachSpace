@@ -569,7 +569,7 @@ final class MessagingService: MessagingServiceProtocol {
     
     @objc private func handleAppDidBecomeActive() {
         Task {
-            if let userId = AuthService.shared.getCurrentUser()?.id {
+            if let userId = await AuthService.shared.getCurrentUser()?.id {
                 try? await updateUserPresence(userId: userId, isOnline: true)
             }
         }
@@ -577,7 +577,7 @@ final class MessagingService: MessagingServiceProtocol {
     
     @objc private func handleAppWillResignActive() {
         Task {
-            if let userId = AuthService.shared.getCurrentUser()?.id {
+            if let userId = await AuthService.shared.getCurrentUser()?.id {
                 try? await updateUserPresence(userId: userId, isOnline: false)
             }
         }
