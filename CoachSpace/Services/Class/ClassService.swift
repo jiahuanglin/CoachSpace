@@ -102,29 +102,58 @@ final class ClassService: ClassServiceProtocol {
     
     func getUpcomingClasses(for userId: String) async throws -> [Class] {
         do {
+            print("🔍 [ClassService] Getting upcoming classes for user: \(userId)")
+            
             let bookings = try await db.collection("bookings")
                 .whereField("userId", isEqualTo: userId)
                 .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
+            print("📚 [ClassService] Found \(bookings.documents.count) confirmed bookings")
+            
             let classIds = bookings.documents.compactMap { $0.data()["classId"] as? String }
-            return try await getClassesById(classIds)
+            print("🎯 [ClassService] Class IDs from bookings: \(classIds)")
+            
+            let classes = try await getClassesById(classIds)
+            let upcomingClasses = classes.filter { $0.startTime > Date() }
+            
+            print("📈 [ClassService] Found \(upcomingClasses.count) upcoming classes out of \(classes.count) total")
+            upcomingClasses.forEach { classItem in
+                print("   - Class: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+            }
+            
+            return upcomingClasses
         } catch {
+            print("❌ [ClassService] Error getting upcoming classes: \(error.localizedDescription)")
             throw ClassError.fetchFailed(error)
         }
     }
     
     func getPastClasses(for userId: String) async throws -> [Class] {
         do {
+            print("🔍 [ClassService] Getting past classes for user: \(userId)")
+            
             let bookings = try await db.collection("bookings")
                 .whereField("userId", isEqualTo: userId)
                 .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
                 .getDocuments()
             
+            print("📚 [ClassService] Found \(bookings.documents.count) confirmed bookings")
+            
             let classIds = bookings.documents.compactMap { $0.data()["classId"] as? String }
+            print("🎯 [ClassService] Class IDs from bookings: \(classIds)")
+            
             let classes = try await getClassesById(classIds)
-            return classes.filter { $0.startTime < Date() }
+            let pastClasses = classes.filter { $0.startTime < Date() }
+            
+            print("📉 [ClassService] Found \(pastClasses.count) past classes out of \(classes.count) total")
+            pastClasses.forEach { classItem in
+                print("   - Class: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+            }
+            
+            return pastClasses
         } catch {
+            print("❌ [ClassService] Error getting past classes: \(error.localizedDescription)")
             throw ClassError.fetchFailed(error)
         }
     }
@@ -263,13 +292,25 @@ final class ClassService: ClassServiceProtocol {
     }
     
     private func getClassesById(_ ids: [String]) async throws -> [Class] {
-        var classes: [Class] = []
-        for id in ids {
-            if let classData = try await getClass(id: id) {
-                classes.append(classData)
-            }
+        print("🔍 [ClassService] Getting classes by IDs: \(ids)")
+        
+        guard !ids.isEmpty else {
+            print("ℹ️ [ClassService] No class IDs provided")
+            return []
         }
-        return classes
+        
+        do {
+            let snapshot = try await db.collection("classes")
+                .whereField(FieldPath.documentID(), in: ids)
+                .getDocuments()
+            
+            let classes = snapshot.documents.compactMap { Class.from($0) }
+            print("📚 [ClassService] Retrieved \(classes.count) classes")
+            return classes
+        } catch {
+            print("❌ [ClassService] Error getting classes by IDs: \(error.localizedDescription)")
+            throw ClassError.fetchFailed(error)
+        }
     }
     
     private func getUsersById(_ ids: [String]) async throws -> [User] {

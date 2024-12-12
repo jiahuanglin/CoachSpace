@@ -5,6 +5,7 @@ struct ScheduleView: View {
     @State private var selectedDate = Date()
     @State private var upcomingClasses: [Class] = []
     @State private var pastClasses: [Class] = []
+    @State private var bookings: [String: Booking] = [:] // Map of classId to Booking
     @State private var isLoading = false
     @State private var error: Error?
     private let calendar = Calendar.current
@@ -20,7 +21,12 @@ struct ScheduleView: View {
                             DateButton(
                                 date: date,
                                 isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
-                                action: { selectedDate = date }
+                                action: { 
+                                    selectedDate = date
+                                    Task {
+                                        await loadClasses()
+                                    }
+                                }
                             )
                         }
                     }
@@ -58,9 +64,14 @@ struct ScheduleView: View {
                     .frame(maxHeight: .infinity)
                 } else {
                     if selectedTab == 0 {
-                        UpcomingClassesView(classes: upcomingClasses)
+                        UpcomingClassesView(classes: upcomingClasses, bookings: bookings)
+                            .onChange(of: bookings) { _ in
+                                Task {
+                                    await loadClasses()
+                                }
+                            }
                     } else {
-                        PastClassesView(classes: pastClasses)
+                        PastClassesView(classes: pastClasses, bookings: bookings)
                     }
                 }
             }
@@ -77,14 +88,65 @@ struct ScheduleView: View {
         error = nil
         
         do {
-            let userId = AuthService.shared.currentUser?.id ?? ""
-            async let upcoming = ClassService.shared.getUpcomingClasses(for: userId)
-            async let past = ClassService.shared.getPastClasses(for: userId)
+            guard let user = AuthService.shared.currentUser else {
+                print("🚫 [ScheduleView] No user logged in")
+                throw NSError(domain: "Schedule", code: 401, userInfo: [NSLocalizedDescriptionKey: "Please log in to view schedule"])
+            }
             
-            let (upcomingResult, pastResult) = try await (upcoming, past)
-            upcomingClasses = upcomingResult
-            pastClasses = pastResult
+            print("👤 [ScheduleView] Loading schedule for user: \(user.id), role: \(user.role)")
+            
+            if user.role == .instructor {
+                // For instructors, load classes they are teaching
+                print("👨‍🏫 [ScheduleView] Loading instructor's classes")
+                let allClasses = try await ClassService.shared.getInstructorClasses(instructorId: user.id)
+                
+                // Split into upcoming and past based on date
+                let now = Date()
+                upcomingClasses = allClasses.filter { $0.startTime > now }
+                pastClasses = allClasses.filter { $0.startTime <= now }
+                
+                print("📈 [ScheduleView] Found \(upcomingClasses.count) upcoming classes to teach")
+                upcomingClasses.forEach { classItem in
+                    print("   - Upcoming: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+                }
+                
+                print("📉 [ScheduleView] Found \(pastClasses.count) past classes taught")
+                pastClasses.forEach { classItem in
+                    print("   - Past: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+                }
+            } else {
+                // For students, load their booked classes
+                print("🎓 [ScheduleView] Loading student's bookings")
+                
+                // Load bookings first
+                let userBookings = try await BookingService.shared.getBookingsForUser(userId: user.id)
+                print("📚 [ScheduleView] Found \(userBookings.count) bookings")
+                userBookings.forEach { booking in
+                    print("   - Booking: classId=\(booking.classId), status=\(booking.status)")
+                }
+                
+                bookings = Dictionary(uniqueKeysWithValues: userBookings.map { ($0.classId, $0) })
+                
+                // Get upcoming and past classes
+                async let upcoming = ClassService.shared.getUpcomingClasses(for: user.id)
+                async let past = ClassService.shared.getPastClasses(for: user.id)
+                
+                let (upcomingResult, pastResult) = try await (upcoming, past)
+                print("📈 [ScheduleView] Found \(upcomingResult.count) upcoming booked classes")
+                upcomingResult.forEach { classItem in
+                    print("   - Upcoming: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+                }
+                
+                print("📉 [ScheduleView] Found \(pastResult.count) past booked classes")
+                pastResult.forEach { classItem in
+                    print("   - Past: id=\(classItem.id), name=\(classItem.name), time=\(classItem.startTime)")
+                }
+                
+                upcomingClasses = upcomingResult
+                pastClasses = pastResult
+            }
         } catch {
+            print("❌ [ScheduleView] Error loading classes: \(error.localizedDescription)")
             self.error = error
         }
         
@@ -94,6 +156,7 @@ struct ScheduleView: View {
 
 struct UpcomingClassesView: View {
     let classes: [Class]
+    let bookings: [String: Booking]
     
     var body: some View {
         if classes.isEmpty {
@@ -108,7 +171,7 @@ struct UpcomingClassesView: View {
                     ForEach(classes) { classItem in
                         UpcomingClassCard(
                             classItem: classItem,
-                            showBookingStatus: true
+                            booking: bookings[classItem.id]
                         )
                     }
                 }
@@ -120,6 +183,7 @@ struct UpcomingClassesView: View {
 
 struct PastClassesView: View {
     let classes: [Class]
+    let bookings: [String: Booking]
     
     var body: some View {
         if classes.isEmpty {
@@ -132,7 +196,10 @@ struct PastClassesView: View {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     ForEach(classes) { classItem in
-                        PastClassCard(classItem: classItem)
+                        PastClassCard(
+                            classItem: classItem,
+                            booking: bookings[classItem.id]
+                        )
                     }
                 }
                 .padding()
@@ -143,7 +210,7 @@ struct PastClassesView: View {
 
 struct UpcomingClassCard: View {
     let classItem: Class
-    var showBookingStatus: Bool = false
+    let booking: Booking?
     @State private var venue: Venue?
     @State private var instructor: User?
     @State private var showingCancelAlert = false
@@ -181,8 +248,18 @@ struct UpcomingClassCard: View {
                     }
                     
                     HStack {
-                        StatusTag(text: "\(classItem.duration)m", icon: "clock.fill")
-                        StatusTag(text: classItem.level.rawValue, icon: "speedometer")
+                        StatusTag(text: "\(classItem.duration)m", icon: "clock.fill", color: .gray)
+                        StatusTag(text: classItem.level.rawValue, icon: "speedometer", color: .gray)
+                        if let booking = booking {
+                            StatusTag(
+                                text: booking.status == .confirmed ? "Confirmed" :
+                                      booking.status == .waitlisted ? "Waitlisted" : "Cancelled",
+                                icon: booking.status == .confirmed ? "checkmark.circle.fill" :
+                                      booking.status == .waitlisted ? "clock.fill" : "xmark.circle.fill",
+                                color: booking.status == .confirmed ? .green :
+                                       booking.status == .waitlisted ? .orange : .red
+                            )
+                        }
                     }
                 }
                 
@@ -196,15 +273,6 @@ struct UpcomingClassCard: View {
             }
             .padding()
             .background(Color(.systemBackground))
-            
-            // Status Bar
-            if showBookingStatus {
-                StatusBar(
-                    text: "Booking Confirmed",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-            }
         }
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5)
@@ -241,88 +309,102 @@ struct UpcomingClassCard: View {
             }
         }
         .contextMenu {
-            Button(role: .destructive) {
-                showingCancelAlert = true
-            } label: {
-                Label("Cancel Booking", systemImage: "xmark.circle")
+            if let booking = booking, booking.status != .cancelled {
+                Button(role: .destructive) {
+                    showingCancelAlert = true
+                } label: {
+                    Label("Cancel Booking", systemImage: "xmark.circle")
+                }
             }
         }
     }
     
     private func cancelBooking() async {
+        guard let booking = booking else { return }
+        
         isCancelling = true
+        error = nil
+        
         do {
-            let userId = AuthService.shared.currentUser?.id ?? ""
-            try await ClassService.shared.cancelBooking(classId: classItem.id, userId: userId)
-            NotificationCenter.default.post(name: .ClassCancelled, object: nil)
+            try await BookingService.shared.cancelBooking(bookingId: booking.id)
         } catch {
             self.error = error
         }
+        
         isCancelling = false
     }
 }
 
 struct PastClassCard: View {
     let classItem: Class
+    let booking: Booking?
+    @State private var venue: Venue?
     @State private var instructor: User?
     @State private var error: Error?
     
     var body: some View {
         VStack(spacing: 0) {
+            // Main Content
             HStack(spacing: 16) {
-                // Class Image
-                if !classItem.imageURL.isEmpty {
-                    AsyncImage(url: URL(string: classItem.imageURL)) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                    }
-                    .frame(width: 80, height: 80)
-                    .cornerRadius(12)
+                // Time Column
+                VStack(spacing: 4) {
+                    Text(classItem.startTime.formatted(date: .omitted, time: .shortened))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                    Text(classItem.startTime.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
+                .frame(width: 60)
                 
                 // Class Info
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(classItem.name)
                         .font(.headline)
                     
                     if let instructor = instructor {
-                        Text("with \(instructor.displayName)")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                        HStack {
+                            Image(systemName: "person.circle.fill")
+                                .foregroundColor(.gray)
+                            Text(instructor.displayName)
+                                .foregroundColor(.gray)
+                        }
+                        .font(.subheadline)
+                    }
+                    
+                    HStack {
+                        StatusTag(text: "\(classItem.duration)m", icon: "clock.fill", color: .gray)
+                        StatusTag(text: classItem.level.rawValue, icon: "speedometer", color: .gray)
+                        if let booking = booking {
+                            StatusTag(
+                                text: booking.status == .confirmed ? "Attended" : "Cancelled",
+                                icon: booking.status == .confirmed ? "checkmark.circle.fill" : "xmark.circle.fill",
+                                color: booking.status == .confirmed ? .green : .red
+                            )
+                        }
                     }
                 }
                 
                 Spacer()
                 
-                // Date
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(classItem.startTime.formatted(date: .abbreviated, time: .omitted))
-                        .font(.subheadline)
+                // Action Button
+                NavigationLink(destination: ClassDetailView(classId: classItem.id)) {
+                    Image(systemName: "chevron.right")
                         .foregroundColor(.gray)
-                    
-                    NavigationLink(destination: ClassDetailView(classId: classItem.id)) {
-                        Text("Details")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
-                    }
                 }
             }
             .padding()
             .background(Color(.systemBackground))
-            .cornerRadius(16)
         }
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5)
         .task {
             do {
-                let instructor = try await UserService.shared.getUser(id: classItem.instructorId)
+                async let venueResult = VenueService.shared.getVenue(id: classItem.venueId)
+                async let instructorResult = UserService.shared.getUser(id: classItem.instructorId)
+                
+                let (venue, instructor) = try await (venueResult, instructorResult)
+                self.venue = venue
                 self.instructor = instructor
             } catch {
                 self.error = error
@@ -334,37 +416,21 @@ struct PastClassCard: View {
 struct StatusTag: View {
     let text: String
     let icon: String
+    let color: Color
     
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
+                .font(.caption)
             Text(text)
-        }
-        .font(.caption)
-        .foregroundColor(.gray)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
-    }
-}
-
-struct StatusBar: View {
-    let text: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        HStack {
-            Image(systemName: icon)
-            Text(text)
-                .font(.subheadline)
+                .font(.caption)
                 .fontWeight(.medium)
         }
         .foregroundColor(color)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .background(color.opacity(0.1))
+        .cornerRadius(8)
     }
 }
 
@@ -373,21 +439,25 @@ struct DateButton: View {
     let isSelected: Bool
     let action: () -> Void
     
+    private let calendar = Calendar.current
+    
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
+                Text(calendar.component(.day, from: date).description)
+                    .font(.headline)
                 Text(date.formatted(.dateTime.weekday(.abbreviated)))
-                    .font(.caption)
-                    .foregroundColor(isSelected ? .white : .gray)
-                Text(date.formatted(.dateTime.day()))
-                    .font(.title3)
-                    .fontWeight(.medium)
-                    .foregroundColor(isSelected ? .white : .primary)
+                    .font(.caption2)
+                    .textCase(.uppercase)
             }
-            .frame(width: 45)
-            .padding(.vertical, 8)
+            .foregroundColor(isSelected ? .white : .primary)
+            .frame(width: 45, height: 64)
             .background(isSelected ? Color.blue : Color.clear)
             .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
+            )
         }
     }
 }

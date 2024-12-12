@@ -243,6 +243,40 @@ async function seedData() {
       console.log(`Created class: ${classData.name}`);
     }
 
+    // Create sample bookings
+    const bookings = [
+      {
+        id: 'booking1',
+        classId: 'class1',
+        userId: userIds['student@example.com'],
+        status: 'confirmed',
+        createdAt: admin.firestore.Timestamp.now()
+      },
+      {
+        id: 'booking2',
+        classId: 'class2',
+        userId: userIds['student@example.com'],
+        status: 'waitlisted',
+        createdAt: admin.firestore.Timestamp.now()
+      }
+    ];
+
+    // Seed bookings
+    console.log('Seeding bookings...');
+    for (const booking of bookings) {
+      await db.collection('bookings').doc(booking.id).set(booking);
+      
+      // Update class participant count for confirmed bookings
+      if (booking.status === 'confirmed') {
+        const classRef = db.collection('classes').doc(booking.classId);
+        await classRef.update({
+          currentParticipants: admin.firestore.FieldValue.increment(1)
+        });
+      }
+      
+      console.log(`Created booking: ${booking.id} (${booking.status})`);
+    }
+
     console.log('Seed data written successfully');
     process.exit(0);
   } catch (error) {

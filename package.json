@@ -1,5 +1,11 @@
 {
+  "name": "coachspace",
+  "version": "1.0.0",
+  "description": "CoachSpace - Fitness Class Booking Platform",
+  "scripts": {
+    "seed": "node scripts/seed-data.js"
+  },
   "dependencies": {
-    "firebase-admin": "^13.0.1"
+    "firebase-admin": "^11.11.1"
   }
 }
