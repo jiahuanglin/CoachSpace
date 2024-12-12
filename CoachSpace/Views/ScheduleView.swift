@@ -3,9 +3,10 @@ import SwiftUI
 struct ScheduleView: View {
     @State private var selectedTab = 0
     @State private var selectedDate = Date()
+    @State private var calendarSheetPresented = false
     @State private var upcomingClasses: [Class] = []
     @State private var pastClasses: [Class] = []
-    @State private var bookings: [String: Booking] = [:] // Map of classId to Booking
+    @State private var bookings: [String: Booking] = [:]
     @State private var isLoading = false
     @State private var error: Error?
     private let calendar = Calendar.current
@@ -13,26 +14,43 @@ struct ScheduleView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Date selector
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(0..<14) { index in
-                            let date = calendar.date(byAdding: .day, value: index, to: Date())!
-                            DateButton(
-                                date: date,
-                                isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
-                                action: { 
-                                    selectedDate = date
-                                    Task {
-                                        await loadClasses()
-                                    }
-                                }
-                            )
+                // Calendar Header
+                VStack(spacing: 12) {
+                    // Month and Year
+                    HStack {
+                        Text(selectedDate.formatted(.dateTime.month().year()))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            calendarSheetPresented = true
+                        }) {
+                            Image(systemName: "calendar")
+                                .font(.title3)
+                                .foregroundColor(.blue)
                         }
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    
+                    // Week View
+                    WeekStripView(
+                        selectedDate: $selectedDate,
+                        onDateSelected: {
+                            Task {
+                                await loadClasses()
+                            }
+                        }
+                    )
                 }
-                .background(Color(.systemBackground))
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: .black.opacity(0.05), radius: 10)
+                )
+                .padding()
                 
                 // Tab Selector
                 Picker("View", selection: $selectedTab) {
@@ -77,6 +95,17 @@ struct ScheduleView: View {
             }
             .navigationTitle("Schedule")
             .background(Color(.systemGray6))
+            .sheet(isPresented: $calendarSheetPresented) {
+                CalendarSheet(
+                    selectedDate: $selectedDate,
+                    onDateSelected: {
+                        calendarSheetPresented = false
+                        Task {
+                            await loadClasses()
+                        }
+                    }
+                )
+            }
         }
         .task {
             await loadClasses()
@@ -434,30 +463,262 @@ struct StatusTag: View {
     }
 }
 
-struct DateButton: View {
+struct WeekStripView: View {
+    @Binding var selectedDate: Date
+    let onDateSelected: () -> Void
+    private let calendar = Calendar.current
+    private let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    @State private var weekOffset = 0
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Week Navigation
+            HStack {
+                Button(action: { changeWeek(-1) }) {
+                    Image(systemName: "chevron.left")
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                Text(weekRange)
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                Button(action: { changeWeek(1) }) {
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Days of Week
+            HStack(spacing: 0) {
+                ForEach(0..<7) { index in
+                    let date = getDate(for: index)
+                    DayButton(
+                        date: date,
+                        isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                        onTap: {
+                            selectedDate = date
+                            onDateSelected()
+                        }
+                    )
+                }
+            }
+        }
+        .onChange(of: selectedDate) { newDate in
+            updateWeekOffset(for: newDate)
+        }
+    }
+    
+    private var weekRange: String {
+        let startOfWeek = calendar.date(byAdding: .day, value: weekOffset * 7, to: Date())!
+        let endOfWeek = calendar.date(byAdding: .day, value: 6, to: startOfWeek)!
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return "\(formatter.string(from: startOfWeek)) - \(formatter.string(from: endOfWeek))"
+    }
+    
+    private func getDate(for index: Int) -> Date {
+        let startOfWeek = calendar.date(byAdding: .day, value: weekOffset * 7, to: Date())!
+        return calendar.date(byAdding: .day, value: index, to: startOfWeek)!
+    }
+    
+    private func changeWeek(_ offset: Int) {
+        weekOffset += offset
+        let startOfWeek = calendar.date(byAdding: .day, value: weekOffset * 7, to: Date())!
+        selectedDate = startOfWeek
+        onDateSelected()
+    }
+    
+    private func updateWeekOffset(for date: Date) {
+        let today = Date()
+        let components = calendar.dateComponents([.day], from: today, to: date)
+        if let dayDifference = components.day {
+            weekOffset = dayDifference / 7
+        }
+    }
+}
+
+struct DayButton: View {
     let date: Date
     let isSelected: Bool
-    let action: () -> Void
+    let onTap: () -> Void
+    private let calendar = Calendar.current
     
+    private var isToday: Bool {
+        calendar.isDateInToday(date)
+    }
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 8) {
+                // Weekday
+                Text(date.formatted(.dateTime.weekday(.abbreviated)))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(isSelected ? .white : .gray)
+                
+                // Day
+                Text("\(calendar.component(.day, from: date))")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundColor(isSelected ? .white : isToday ? .blue : .primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.blue : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isToday && !isSelected ? Color.blue : Color.clear, lineWidth: 1)
+                    )
+            )
+        }
+    }
+}
+
+struct CalendarSheet: View {
+    @Binding var selectedDate: Date
+    let onDateSelected: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    private let calendar = Calendar.current
+    @State private var displayedMonth: Date
+    
+    init(selectedDate: Binding<Date>, onDateSelected: @escaping () -> Void) {
+        self._selectedDate = selectedDate
+        self.onDateSelected = onDateSelected
+        self._displayedMonth = State(initialValue: selectedDate.wrappedValue)
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                // Month Navigation
+                HStack {
+                    Button(action: { changeMonth(-1) }) {
+                        Image(systemName: "chevron.left")
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(displayedMonth.formatted(.dateTime.month().year()))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    Button(action: { changeMonth(1) }) {
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.gray)
+                    }
+                }
+                .padding()
+                
+                // Weekday Headers
+                HStack {
+                    ForEach(calendar.shortWeekdaySymbols, id: \.self) { weekday in
+                        Text(weekday)
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal)
+                
+                // Calendar Grid
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
+                    ForEach(days, id: \.self) { date in
+                        if let date = date {
+                            MonthDayButton(
+                                date: date,
+                                isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                                isToday: calendar.isDateInToday(date)
+                            ) {
+                                selectedDate = date
+                                onDateSelected()
+                                dismiss()
+                            }
+                        } else {
+                            Color.clear
+                                .aspectRatio(1, contentMode: .fill)
+                        }
+                    }
+                }
+                .padding()
+                
+                Spacer()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private var days: [Date?] {
+        let start = calendar.date(from: calendar.dateComponents([.year, .month], from: displayedMonth))!
+        let daysInMonth = calendar.range(of: .day, in: .month, for: start)!.count
+        
+        let firstWeekday = calendar.component(.weekday, from: start)
+        let leadingSpaces = firstWeekday - 1
+        
+        var days: [Date?] = Array(repeating: nil, count: leadingSpaces)
+        
+        for day in 1...daysInMonth {
+            if let date = calendar.date(byAdding: .day, value: day - 1, to: start) {
+                days.append(date)
+            }
+        }
+        
+        let trailingSpaces = 7 - (days.count % 7)
+        if trailingSpaces < 7 {
+            days.append(contentsOf: Array(repeating: nil as Date?, count: trailingSpaces))
+        }
+        
+        return days
+    }
+    
+    private func changeMonth(_ offset: Int) {
+        if let newMonth = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
+            displayedMonth = newMonth
+        }
+    }
+}
+
+struct MonthDayButton: View {
+    let date: Date
+    let isSelected: Bool
+    let isToday: Bool
+    let onTap: () -> Void
     private let calendar = Calendar.current
     
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Text(calendar.component(.day, from: date).description)
-                    .font(.headline)
-                Text(date.formatted(.dateTime.weekday(.abbreviated)))
-                    .font(.caption2)
-                    .textCase(.uppercase)
-            }
-            .foregroundColor(isSelected ? .white : .primary)
-            .frame(width: 45, height: 64)
-            .background(isSelected ? Color.blue : Color.clear)
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
-            )
+        Button(action: onTap) {
+            Text("\(calendar.component(.day, from: date))")
+                .font(.body)
+                .fontWeight(isToday ? .bold : .regular)
+                .foregroundColor(isSelected ? .white : isToday ? .blue : .primary)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fill)
+                .background(
+                    Circle()
+                        .fill(isSelected ? Color.blue : Color.clear)
+                        .overlay(
+                            Circle()
+                                .stroke(isToday && !isSelected ? Color.blue : Color.clear, lineWidth: 1)
+                        )
+                )
         }
     }
 }

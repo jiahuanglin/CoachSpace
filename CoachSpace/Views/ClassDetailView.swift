@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 struct ClassDetailView: View {
     let classId: String
@@ -10,6 +11,9 @@ struct ClassDetailView: View {
     @State private var isLoading = true
     @State private var error: Error?
     @State private var showingCancelAlert = false
+    @State private var showingCalendarSheet = false
+    @State private var showingCalendarAlert = false
+    @State private var calendarError: Error?
     @State private var isProcessing = false
     @Environment(\.dismiss) private var dismiss
     
@@ -17,6 +21,17 @@ struct ClassDetailView: View {
         guard let user = AuthService.shared.currentUser,
               let classData = classData else { return false }
         return user.role == .instructor && user.id == classData.instructorId
+    }
+    
+    var canAddToCalendar: Bool {
+        guard let classData = classData else { return false }
+        if isInstructor {
+            // Instructor can add if there are participants
+            return classData.currentParticipants > 0
+        } else {
+            // Student can add if they have a confirmed booking
+            return booking?.status == .confirmed
+        }
     }
     
     var body: some View {
@@ -188,9 +203,26 @@ struct ClassDetailView: View {
                             }
                         }
                         
-                        // Action Button
+                        // Calendar Sync Button
+                        if canAddToCalendar {
+                            Button(action: {
+                                showingCalendarSheet = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "calendar.badge.plus")
+                                    Text(isInstructor ? "Add Class Schedule" : "Add to Calendar")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.green)
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                            }
+                            .disabled(isProcessing)
+                        }
+                        
+                        // Action Buttons
                         if isInstructor {
-                            // Instructor sees Cancel Class button
                             Button(action: {
                                 showingCancelAlert = true
                             }) {
@@ -206,7 +238,6 @@ struct ClassDetailView: View {
                             }
                             .disabled(isProcessing)
                         } else if let booking = booking {
-                            // Student sees Cancel Booking button if they have a booking
                             if booking.status != .cancelled {
                                 Button(action: {
                                     showingCancelAlert = true
@@ -224,7 +255,6 @@ struct ClassDetailView: View {
                                 .disabled(isProcessing)
                             }
                         } else {
-                            // Student sees Book Class button if they don't have a booking
                             Button(action: {
                                 Task {
                                     await bookClass()
@@ -253,6 +283,15 @@ struct ClassDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Calendar Sync", isPresented: $showingCalendarAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let error = calendarError {
+                Text(error.localizedDescription)
+            } else {
+                Text(isInstructor ? "Class schedule has been added to your calendar!" : "Class has been added to your calendar!")
+            }
+        }
         .alert(isInstructor ? "Cancel Class" : "Cancel Booking", isPresented: $showingCancelAlert) {
             Button(isInstructor ? "Yes, Cancel Class" : "Cancel Booking", role: .destructive) {
                 Task {
@@ -270,6 +309,18 @@ struct ClassDetailView: View {
             } else {
                 Text("Are you sure you want to cancel your booking? This action cannot be undone.")
             }
+        }
+        .sheet(isPresented: $showingCalendarSheet) {
+            CalendarOptionsSheet(
+                classData: classData,
+                venue: venue,
+                instructor: instructor,
+                isProcessing: $isProcessing,
+                error: $calendarError,
+                showAlert: $showingCalendarAlert,
+                isInstructor: isInstructor,
+                dismiss: { showingCalendarSheet = false }
+            )
         }
         .task {
             await loadData()
@@ -357,6 +408,89 @@ struct ClassDetailView: View {
             dismiss() // Return to schedule view after cancelling
         } catch {
             self.error = error
+        }
+        
+        isProcessing = false
+    }
+}
+
+struct CalendarOptionsSheet: View {
+    let classData: Class?
+    let venue: Venue?
+    let instructor: User?
+    @Binding var isProcessing: Bool
+    @Binding var error: Error?
+    @Binding var showAlert: Bool
+    let isInstructor: Bool
+    let dismiss: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    Button(action: {
+                        Task {
+                            await addToLocalCalendar()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "calendar")
+                                .foregroundColor(.blue)
+                            Text(isInstructor ? "Add to iPhone Calendar as Instructor" : "Add to iPhone Calendar")
+                        }
+                    }
+                    .disabled(isProcessing)
+                } header: {
+                    Text("Local Calendar")
+                } footer: {
+                    if isInstructor {
+                        Text("Add this class to your calendar with instructor details and participant count")
+                    }
+                }
+                
+                Section {
+                    Button(action: {
+                        // Show Google Sign In
+                        dismiss()
+                    }) {
+                        HStack {
+                            Image(systemName: "g.circle.fill")
+                                .foregroundColor(.red)
+                            Text("Sign in with Google Calendar")
+                        }
+                    }
+                    .disabled(isProcessing)
+                } header: {
+                    Text("Google Calendar")
+                } footer: {
+                    Text("Sign in with Google to sync with Google Calendar")
+                }
+            }
+            .navigationTitle(isInstructor ? "Add Class Schedule" : "Add to Calendar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func addToLocalCalendar() async {
+        guard let classData = classData else { return }
+        
+        isProcessing = true
+        error = nil
+        
+        do {
+            try await CalendarService.shared.addToLocalCalendar(classData, venue: venue, instructor: instructor)
+            showAlert = true
+            dismiss()
+        } catch {
+            self.error = error
+            showAlert = true
         }
         
         isProcessing = false
