@@ -33,14 +33,7 @@ struct User: Identifiable, Codable {
         let preferredLevels: [Class.Level]
         let preferredInstructors: [String] // Instructor IDs
         let preferredVenues: [String] // Venue IDs
-        let equipment: Equipment
         let notifications: NotificationPreferences
-        
-        struct Equipment: Codable {
-            let hasOwnEquipment: Bool
-            let equipmentDetails: [String]
-            let preferredRentalLocation: String?
-        }
         
         struct NotificationPreferences: Codable {
             let classReminders: Bool

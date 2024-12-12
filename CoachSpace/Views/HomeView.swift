@@ -94,7 +94,7 @@ struct HomeView: View {
                         
                         // Nearby Classes
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Nearby Classes", actionTitle: "View Map")
+                            SectionHeader(title: "Nearby Classes", icon: "map")
                             
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 20) {
@@ -108,7 +108,7 @@ struct HomeView: View {
                         
                         // Popular Instructors
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Top Rated Instructors", actionTitle: "See All")
+                            SectionHeader(title: "Top Rated Instructors", icon: "star.fill")
                             
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 16) {
@@ -274,7 +274,7 @@ struct PopularInstructorCard: View {
 
 struct SectionHeader: View {
     let title: String
-    let actionTitle: String
+    let icon: String
     
     var body: some View {
         HStack {
@@ -283,7 +283,7 @@ struct SectionHeader: View {
                 .fontWeight(.bold)
             Spacer()
             Button(action: {}) {
-                Text(actionTitle)
+                Text("View All")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.blue)

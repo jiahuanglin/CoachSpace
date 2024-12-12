@@ -25,9 +25,23 @@ final class UserService: UserServiceProtocol {
     
     func getUser(id: String) async throws -> User? {
         do {
+            print("Attempting to fetch user document with ID:", id)
             let doc = try await db.collection("users").document(id).getDocument()
-            return User.from(doc)
+            print("Document exists:", doc.exists)
+            if doc.exists {
+                print("Document data:", doc.data() ?? [:])
+            }
+            
+            let user = User.from(doc)
+            print("User conversion result:", user != nil ? "Success" : "Failed")
+            return user
         } catch {
+            print("Error fetching user document - Type: \(type(of: error))")
+            print("Error details: \(error.localizedDescription)")
+            if let nsError = error as NSError? {
+                print("NSError domain: \(nsError.domain), code: \(nsError.code)")
+                print("Debug description: \(nsError.debugDescription)")
+            }
             throw UserError.fetchFailed(error)
         }
     }

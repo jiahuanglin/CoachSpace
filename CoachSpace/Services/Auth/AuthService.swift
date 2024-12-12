@@ -79,11 +79,6 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                 preferredLevels: [],
                 preferredInstructors: [],
                 preferredVenues: [],
-                equipment: .init(
-                    hasOwnEquipment: false,
-                    equipmentDetails: [],
-                    preferredRentalLocation: nil
-                ),
                 notifications: .init(
                     classReminders: true,
                     promotions: true,
@@ -122,13 +117,43 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
     
     func signIn(email: String, password: String) async throws -> User {
         do {
+            print("Attempting Firebase Auth sign in...")
             let result = try await auth.signIn(withEmail: email, password: password)
-            guard let user = try await userService.getUser(id: result.user.uid) else {
+            print("Auth successful with UID:", result.user.uid)
+            
+            do {
+                print("Fetching user document from Firestore...")
+                let userDoc = try await userService.getUser(id: result.user.uid)
+                print("Firestore fetch result:", userDoc != nil ? "Document found" : "Document not found")
+                
+                if let user = userDoc {
+                    print("Successfully retrieved user data")
+                    NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+                    return user
+                } else {
+                    print("Creating placeholder user...")
+                    let placeholderUser = createPlaceholderUser(from: result.user)
+                    try await userService.createUser(placeholderUser)
+                    print("Placeholder user created successfully")
+                    NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+                    return placeholderUser
+                }
+            } catch {
+                print("Error in Firestore operations - Type: \(type(of: error))")
+                print("Error details: \(error.localizedDescription)")
+                if let nsError = error as NSError? {
+                    print("NSError domain: \(nsError.domain), code: \(nsError.code)")
+                    print("Debug description: \(nsError.debugDescription)")
+                }
                 throw AuthError.userNotFound
             }
-            NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
-            return user
         } catch {
+            print("Firebase Auth error - Type: \(type(of: error))")
+            print("Error details: \(error.localizedDescription)")
+            if let nsError = error as NSError? {
+                print("NSError domain: \(nsError.domain), code: \(nsError.code)")
+                print("Debug description: \(nsError.debugDescription)")
+            }
             throw AuthError.signInFailed(error)
         }
     }
@@ -148,11 +173,6 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                     preferredLevels: [],
                     preferredInstructors: [],
                     preferredVenues: [],
-                    equipment: .init(
-                        hasOwnEquipment: false,
-                        equipmentDetails: [],
-                        preferredRentalLocation: nil
-                    ),
                     notifications: .init(
                         classReminders: true,
                         promotions: true,
@@ -247,11 +267,6 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                 preferredLevels: [],
                 preferredInstructors: [],
                 preferredVenues: [],
-                equipment: .init(
-                    hasOwnEquipment: false,
-                    equipmentDetails: [],
-                    preferredRentalLocation: nil
-                ),
                 notifications: .init(
                     classReminders: true,
                     promotions: true,
