@@ -18,6 +18,7 @@ protocol ClassServiceProtocol {
     func getClassParticipants(classId: String) async throws -> [User]
     func addClassReview(classId: String, userId: String, rating: Int, comment: String) async throws
     func getClassReviews(classId: String) async throws -> [Review]
+    func cancelClass(_ classId: String) async throws
 }
 
 final class ClassService: ClassServiceProtocol {
@@ -288,6 +289,50 @@ final class ClassService: ClassServiceProtocol {
             return snapshot.documents.compactMap { Review.from($0) }
         } catch {
             throw ClassError.fetchFailed(error)
+        }
+    }
+    
+    func cancelClass(_ classId: String) async throws {
+        print("🚫 [ClassService] Cancelling class: \(classId)")
+        
+        do {
+            // Get all bookings for this class
+            let bookings = try await db.collection("bookings")
+                .whereField("classId", isEqualTo: classId)
+                .whereField("status", isEqualTo: Booking.BookingStatus.confirmed.rawValue)
+                .getDocuments()
+            
+            print("📚 [ClassService] Found \(bookings.documents.count) active bookings to cancel")
+            
+            // Start a batch write
+            let batch = db.batch()
+            
+            // Cancel all bookings
+            for booking in bookings.documents {
+                let bookingRef = db.collection("bookings").document(booking.documentID)
+                let updatedData: [String: Any] = [
+                    "status": Booking.BookingStatus.cancelled.rawValue
+                ]
+                batch.updateData(updatedData, forDocument: bookingRef)
+            }
+            
+            // Delete the class
+            let classRef = db.collection("classes").document(classId)
+            batch.deleteDocument(classRef)
+            
+            // Commit the batch
+            try await batch.commit()
+            
+            print("✅ [ClassService] Successfully cancelled class and all related bookings")
+            
+            NotificationCenter.default.post(
+                name: .ClassCancelled,
+                object: nil,
+                userInfo: ["classId": classId]
+            )
+        } catch {
+            print("❌ [ClassService] Error cancelling class: \(error.localizedDescription)")
+            throw ClassError.cancellationFailed(error)
         }
     }
     

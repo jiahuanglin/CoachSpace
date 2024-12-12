@@ -6,14 +6,18 @@ struct ClassDetailView: View {
     @State private var venue: Venue?
     @State private var instructor: User?
     @State private var reviews: [Review] = []
+    @State private var booking: Booking?
     @State private var isLoading = true
     @State private var error: Error?
-    @State private var booking: Booking?
-    @State private var isBooking = false
-    @State private var bookingError: Error?
-    @State private var showingBookingAlert = false
     @State private var showingCancelAlert = false
+    @State private var isProcessing = false
     @Environment(\.dismiss) private var dismiss
+    
+    var isInstructor: Bool {
+        guard let user = AuthService.shared.currentUser,
+              let classData = classData else { return false }
+        return user.role == .instructor && user.id == classData.instructorId
+    }
     
     var body: some View {
         ScrollView {
@@ -184,10 +188,47 @@ struct ClassDetailView: View {
                             }
                         }
                         
-                        // Booking Button
-                        if booking == nil {
+                        // Action Button
+                        if isInstructor {
+                            // Instructor sees Cancel Class button
                             Button(action: {
-                                showingBookingAlert = true
+                                showingCancelAlert = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "xmark.circle")
+                                    Text("Cancel Class")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.red)
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                            }
+                            .disabled(isProcessing)
+                        } else if let booking = booking {
+                            // Student sees Cancel Booking button if they have a booking
+                            if booking.status != .cancelled {
+                                Button(action: {
+                                    showingCancelAlert = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "xmark.circle")
+                                        Text("Cancel Booking")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.red)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(10)
+                                }
+                                .disabled(isProcessing)
+                            }
+                        } else {
+                            // Student sees Book Class button if they don't have a booking
+                            Button(action: {
+                                Task {
+                                    await bookClass()
+                                }
                             }) {
                                 HStack {
                                     Image(systemName: "calendar.badge.plus")
@@ -199,52 +240,11 @@ struct ClassDetailView: View {
                                 .foregroundColor(.white)
                                 .cornerRadius(10)
                             }
-                            .disabled(isBooking)
-                            .alert("Confirm Booking", isPresented: $showingBookingAlert) {
-                                Button("Book Now", role: .none) {
-                                    Task {
-                                        await bookClass()
-                                    }
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("Would you like to book this class?")
-                            }
-                        } else if booking?.status != .cancelled {
-                            Button(action: {
-                                showingCancelAlert = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "xmark.circle")
-                                    Text("Cancel Booking")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.red)
-                                .foregroundColor(.white)
-                                .cornerRadius(10)
-                            }
-                            .alert("Cancel Booking", isPresented: $showingCancelAlert) {
-                                Button("Cancel Booking", role: .destructive) {
-                                    Task {
-                                        await cancelBooking()
-                                    }
-                                }
-                                Button("Keep Booking", role: .cancel) {}
-                            } message: {
-                                Text("Are you sure you want to cancel this booking?")
-                            }
+                            .disabled(isProcessing)
                         }
                         
-                        if isBooking {
+                        if isProcessing {
                             ProgressView()
-                                .frame(maxWidth: .infinity)
-                        }
-                        
-                        if let bookingError = bookingError {
-                            Text(bookingError.localizedDescription)
-                                .font(.caption)
-                                .foregroundColor(.red)
                                 .frame(maxWidth: .infinity)
                         }
                     }
@@ -253,6 +253,24 @@ struct ClassDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .alert(isInstructor ? "Cancel Class" : "Cancel Booking", isPresented: $showingCancelAlert) {
+            Button(isInstructor ? "Yes, Cancel Class" : "Cancel Booking", role: .destructive) {
+                Task {
+                    if isInstructor {
+                        await cancelClass()
+                    } else {
+                        await cancelBooking()
+                    }
+                }
+            }
+            Button(isInstructor ? "No, Keep Class" : "Keep Booking", role: .cancel) {}
+        } message: {
+            if isInstructor {
+                Text("Are you sure you want to cancel this class? This will cancel all student bookings and remove the class from the schedule. This action cannot be undone.")
+            } else {
+                Text("Are you sure you want to cancel your booking? This action cannot be undone.")
+            }
+        }
         .task {
             await loadData()
         }
@@ -263,30 +281,31 @@ struct ClassDetailView: View {
         error = nil
         
         do {
-            async let classResult = ClassService.shared.getClass(id: classId)
-            let classData = try await classResult
-            
+            // First get the class data
+            let classData = try await ClassService.shared.getClass(id: classId)
             guard let classData = classData else {
                 throw ClassError.classNotFound
             }
             
             self.classData = classData
             
+            // Then load related data concurrently
             async let venueResult = VenueService.shared.getVenue(id: classData.venueId)
             async let instructorResult = UserService.shared.getUser(id: classData.instructorId)
             async let reviewsResult = ClassService.shared.getClassReviews(classId: classId)
-            
-            // Load booking status if user is logged in
-            if let userId = AuthService.shared.currentUser?.id {
-                let bookings = try await BookingService.shared.getBookingsForClass(classId: classId)
-                self.booking = bookings.first { $0.userId == userId }
-            }
             
             let (venue, instructor, reviews) = try await (venueResult, instructorResult, reviewsResult)
             
             self.venue = venue
             self.instructor = instructor
             self.reviews = reviews
+            
+            // Load booking status if user is logged in and not the instructor
+            if let userId = AuthService.shared.currentUser?.id,
+               userId != classData.instructorId {
+                let bookings = try await BookingService.shared.getBookingsForClass(classId: classId)
+                booking = bookings.first { $0.userId == userId }
+            }
         } catch {
             self.error = error
         }
@@ -295,38 +314,52 @@ struct ClassDetailView: View {
     }
     
     private func bookClass() async {
-        guard let userId = AuthService.shared.currentUser?.id else {
-            bookingError = NSError(domain: "Booking", code: 401, userInfo: [NSLocalizedDescriptionKey: "Please log in to book classes"])
-            return
-        }
+        guard let userId = AuthService.shared.currentUser?.id else { return }
         
-        isBooking = true
-        bookingError = nil
+        isProcessing = true
+        error = nil
         
         do {
-            let booking = try await BookingService.shared.createBooking(for: classId, userId: userId)
-            self.booking = booking
+            try await ClassService.shared.bookClass(classId, userId: userId)
+            await loadData() // Reload to get updated status
         } catch {
-            bookingError = error
+            self.error = error
         }
         
-        isBooking = false
+        isProcessing = false
     }
     
     private func cancelBooking() async {
-        guard let booking = booking else { return }
+        guard let booking = booking,
+              let userId = AuthService.shared.currentUser?.id else { return }
         
-        isBooking = true
-        bookingError = nil
+        isProcessing = true
+        error = nil
         
         do {
-            try await BookingService.shared.cancelBooking(bookingId: booking.id)
+            try await ClassService.shared.cancelBooking(classId: booking.classId, userId: userId)
             await loadData() // Reload to get updated booking status
         } catch {
-            bookingError = error
+            self.error = error
         }
         
-        isBooking = false
+        isProcessing = false
+    }
+    
+    private func cancelClass() async {
+        guard isInstructor else { return }
+        
+        isProcessing = true
+        error = nil
+        
+        do {
+            try await ClassService.shared.cancelClass(classId)
+            dismiss() // Return to schedule view after cancelling
+        } catch {
+            self.error = error
+        }
+        
+        isProcessing = false
     }
 }
 
