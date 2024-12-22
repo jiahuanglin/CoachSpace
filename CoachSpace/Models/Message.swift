@@ -60,6 +60,8 @@ struct ChatRoom: Identifiable, Codable {
     let lastMessage: Message?
     let classId: String?
     let type: ChatRoomType
+    let name: String?
+    let imageURL: String?
     let createdAt: Date
     let updatedAt: Date
     

@@ -83,6 +83,9 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                     classReminders: true,
                     promotions: true,
                     messages: true,
+                    bookingUpdates: true,
+                    achievementAlerts: true,
+                    skillLevelUpdates: true,
                     email: true,
                     push: true,
                     sms: false
@@ -102,6 +105,7 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                 measurementSystem: .metric
             ),
             status: .active,
+            fcmToken: nil,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -177,6 +181,9 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                         classReminders: true,
                         promotions: true,
                         messages: true,
+                        bookingUpdates: true,
+                        achievementAlerts: true,
+                        skillLevelUpdates: true,
                         email: true,
                         push: true,
                         sms: false
@@ -196,6 +203,7 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                     measurementSystem: .metric
                 ),
                 status: .active,
+                fcmToken: nil,
                 createdAt: Date(),
                 updatedAt: Date()
             )
@@ -271,6 +279,9 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                     classReminders: true,
                     promotions: true,
                     messages: true,
+                    bookingUpdates: true,
+                    achievementAlerts: true,
+                    skillLevelUpdates: true,
                     email: true,
                     push: true,
                     sms: false
@@ -290,6 +301,7 @@ final class AuthService: ObservableObject, AuthServiceProtocol {
                 measurementSystem: .metric
             ),
             status: .active,
+            fcmToken: nil,
             createdAt: Date(),
             updatedAt: Date()
         )

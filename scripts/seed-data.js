@@ -64,6 +64,9 @@ async function seedData() {
             classReminders: true,
             promotions: false,
             messages: true,
+            bookingUpdates: true,
+            achievementAlerts: true,
+            skillLevelUpdates: true,
             email: true,
             push: true,
             sms: false
@@ -119,6 +122,9 @@ async function seedData() {
             classReminders: true,
             promotions: true,
             messages: true,
+            bookingUpdates: true,
+            achievementAlerts: true,
+            skillLevelUpdates: true,
             email: true,
             push: true,
             sms: true
@@ -186,6 +192,7 @@ async function seedData() {
             measurementSystem: 'metric'
           },
           status: 'active',
+          fcmToken: null,
           createdAt: admin.firestore.Timestamp.now(),
           updatedAt: admin.firestore.Timestamp.now()
         }, { merge: true });
@@ -241,6 +248,210 @@ async function seedData() {
     for (const classData of classes) {
       await db.collection('classes').doc(classData.id).set(classData);
       console.log(`Created class: ${classData.name}`);
+    }
+
+    // Seed chat rooms and messages
+    const chatRooms = [
+      {
+        id: 'chat1',
+        type: 'direct',
+        participants: [userIds['student@example.com'], userIds['instructor@example.com']],
+        participantProfiles: {
+          [userIds['student@example.com']]: {
+            displayName: 'Alex Chen',
+            imageURL: 'https://example.com/profile1.jpg',
+            role: 'student'
+          },
+          [userIds['instructor@example.com']]: {
+            displayName: 'Mike Wilson',
+            imageURL: 'https://example.com/profile2.jpg',
+            role: 'instructor'
+          }
+        },
+        lastMessage: {
+          content: 'See you at the lesson tomorrow!',
+          senderId: userIds['instructor@example.com'],
+          timestamp: admin.firestore.Timestamp.now(),
+          read: false
+        },
+        unreadCount: {
+          [userIds['student@example.com']]: 1,
+          [userIds['instructor@example.com']]: 0
+        },
+        imageURL: 'https://example.com/chat1.jpg',
+        createdAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 86400000)), // Yesterday
+        updatedAt: admin.firestore.Timestamp.now()
+      },
+      {
+        id: 'chat2',
+        type: 'classGroup',
+        name: 'Beginner Snowboarding Group',
+        participants: [userIds['student@example.com'], userIds['instructor@example.com']],
+        participantProfiles: {
+          [userIds['student@example.com']]: {
+            displayName: 'Alex Chen',
+            imageURL: 'https://example.com/profile1.jpg',
+            role: 'student'
+          },
+          [userIds['instructor@example.com']]: {
+            displayName: 'Mike Wilson',
+            imageURL: 'https://example.com/profile2.jpg',
+            role: 'instructor'
+          }
+        },
+        lastMessage: {
+          content: 'Don\'t forget to bring your gear!',
+          senderId: userIds['instructor@example.com'],
+          timestamp: admin.firestore.Timestamp.now(),
+          read: false
+        },
+        unreadCount: {
+          [userIds['student@example.com']]: 1,
+          [userIds['instructor@example.com']]: 0
+        },
+        imageURL: 'https://example.com/chat2.jpg',
+        createdAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 172800000)), // 2 days ago
+        updatedAt: admin.firestore.Timestamp.now()
+      }
+    ];
+
+    // Create chat room references in userChatRooms collection
+    for (const chatRoom of chatRooms) {
+      // First create the main chat room document
+      await db.collection('chatRooms').doc(chatRoom.id).set({
+        ...chatRoom,
+        lastMessage: {
+          ...chatRoom.lastMessage,
+          timestamp: admin.firestore.Timestamp.now()
+        },
+        updatedAt: admin.firestore.Timestamp.now()
+      });
+      console.log(`Created main chat room: ${chatRoom.id}`);
+
+      // Then create references for each participant
+      for (const userId of chatRoom.participants) {
+        const userChatRoom = {
+          id: chatRoom.id,
+          chatRoomId: chatRoom.id,  // Add this explicit field
+          type: chatRoom.type,
+          name: chatRoom.name || null,
+          participants: chatRoom.participants,
+          participantProfiles: chatRoom.participantProfiles,
+          lastMessage: chatRoom.lastMessage,
+          unreadCount: chatRoom.unreadCount[userId] || 0,
+          imageURL: chatRoom.imageURL,
+          createdAt: chatRoom.createdAt,
+          updatedAt: chatRoom.updatedAt,
+          lastReadTimestamp: admin.firestore.Timestamp.now(),
+          isArchived: false,
+          isPinned: false
+        };
+
+        await db.collection('userChatRooms').doc(userId).collection('rooms').doc(chatRoom.id).set(userChatRoom);
+        console.log(`Created chat room reference for user: ${userId} in room: ${chatRoom.id}`);
+      }
+    }
+
+    // Create messages
+    const messages = [
+      // Chat 1 messages
+      {
+        id: 'msg1',
+        chatRoomId: 'chat1',
+        content: 'Welcome to CoachSpace! How can I help you today?',
+        senderId: userIds['instructor@example.com'],
+        senderProfile: {
+          displayName: 'Mike Wilson',
+          imageURL: 'https://example.com/profile2.jpg',
+          role: 'instructor'
+        },
+        timestamp: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 3600000)), // 1 hour ago
+        read: true,
+        type: 'text',
+        status: 'sent'  // Add message status
+      },
+      {
+        id: 'msg2',
+        chatRoomId: 'chat1',
+        content: 'Hi! I\'m interested in the beginner snowboarding class',
+        senderId: userIds['student@example.com'],
+        senderProfile: {
+          displayName: 'Alex Chen',
+          imageURL: 'https://example.com/profile1.jpg',
+          role: 'student'
+        },
+        timestamp: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 3300000)), // 55 min ago
+        read: true,
+        type: 'text',
+        status: 'sent'
+      },
+      {
+        id: 'msg3',
+        chatRoomId: 'chat1',
+        content: 'Great choice! I see you\'ve already booked. Looking forward to teaching you!',
+        senderId: userIds['instructor@example.com'],
+        senderProfile: {
+          displayName: 'Mike Wilson',
+          imageURL: 'https://example.com/profile2.jpg',
+          role: 'instructor'
+        },
+        timestamp: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 3000000)), // 50 min ago
+        read: true,
+        type: 'text',
+        status: 'sent'
+      },
+      {
+        id: 'msg4',
+        chatRoomId: 'chat1',
+        content: 'See you at the lesson tomorrow!',
+        senderId: userIds['instructor@example.com'],
+        senderProfile: {
+          displayName: 'Mike Wilson',
+          imageURL: 'https://example.com/profile2.jpg',
+          role: 'instructor'
+        },
+        timestamp: admin.firestore.Timestamp.now(),
+        read: false,
+        type: 'text',
+        status: 'sent'
+      },
+      // Chat 2 messages
+      {
+        id: 'msg5',
+        chatRoomId: 'chat2',
+        content: 'Welcome everyone to the Beginner Snowboarding class chat!',
+        senderId: userIds['instructor@example.com'],
+        senderProfile: {
+          displayName: 'Mike Wilson',
+          imageURL: 'https://example.com/profile2.jpg',
+          role: 'instructor'
+        },
+        timestamp: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 172800000)), // 2 days ago
+        read: true,
+        type: 'text',
+        status: 'sent'
+      },
+      {
+        id: 'msg6',
+        chatRoomId: 'chat2',
+        content: 'Don\'t forget to bring your gear!',
+        senderId: userIds['instructor@example.com'],
+        senderProfile: {
+          displayName: 'Mike Wilson',
+          imageURL: 'https://example.com/profile2.jpg',
+          role: 'instructor'
+        },
+        timestamp: admin.firestore.Timestamp.now(),
+        read: false,
+        type: 'text',
+        status: 'sent'
+      }
+    ];
+
+    // Seed messages
+    for (const message of messages) {
+      await db.collection('chatRooms').doc(message.chatRoomId).collection('messages').doc(message.id).set(message);
+      console.log(`Created message: ${message.id} in chat: ${message.chatRoomId}`);
     }
 
     // Create sample bookings

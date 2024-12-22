@@ -206,9 +206,12 @@ final class ClassService: ClassServiceProtocol {
             ])
             
             NotificationCenter.default.post(
-                name: .ClassBooked,
+                name: NotificationNames.ClassBooked,
                 object: nil,
-                userInfo: ["classId": classId, "userId": userId]
+                userInfo: [
+                    "classId": classId,
+                    "userId": userId
+                ]
             )
         } catch {
             throw ClassError.bookingFailed(error)
@@ -234,9 +237,12 @@ final class ClassService: ClassServiceProtocol {
             ])
             
             NotificationCenter.default.post(
-                name: .ClassCancelled,
+                name: NotificationNames.ClassCancelled,
                 object: nil,
-                userInfo: ["classId": classId, "userId": userId]
+                userInfo: [
+                    "classId": classId,
+                    "userId": userId
+                ]
             )
         } catch {
             throw ClassError.cancellationFailed(error)
@@ -271,9 +277,13 @@ final class ClassService: ClassServiceProtocol {
             try await db.collection("reviews").document(review.id).setData(review.toFirestore)
             
             NotificationCenter.default.post(
-                name: .ClassReviewAdded,
+                name: NotificationNames.ClassReviewAdded,
                 object: nil,
-                userInfo: ["classId": classId, "userId": userId, "review": review]
+                userInfo: [
+                    "classId": classId,
+                    "userId": userId,
+                    "review": review
+                ]
             )
         } catch {
             throw ClassError.reviewFailed(error)
@@ -326,9 +336,11 @@ final class ClassService: ClassServiceProtocol {
             print("✅ [ClassService] Successfully cancelled class and all related bookings")
             
             NotificationCenter.default.post(
-                name: .ClassCancelled,
+                name: NotificationNames.ClassCancelled,
                 object: nil,
-                userInfo: ["classId": classId]
+                userInfo: [
+                    "classId": classId
+                ]
             )
         } catch {
             print("❌ [ClassService] Error cancelling class: \(error.localizedDescription)")
@@ -423,4 +435,5 @@ extension Notification.Name {
     static let ClassBooked = Notification.Name("ClassBooked")
     static let ClassCancelled = Notification.Name("ClassCancelled")
     static let ClassReviewAdded = Notification.Name("ClassReviewAdded")
+    static let BookingStatusChanged = Notification.Name("BookingStatusChanged")
 } 

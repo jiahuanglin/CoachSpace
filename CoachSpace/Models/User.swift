@@ -12,6 +12,7 @@ struct User: Identifiable, Codable {
     let stats: UserStats
     let settings: UserSettings
     let status: UserStatus
+    let fcmToken: String?
     let createdAt: Date
     let updatedAt: Date
     
@@ -39,6 +40,9 @@ struct User: Identifiable, Codable {
             let classReminders: Bool
             let promotions: Bool
             let messages: Bool
+            let bookingUpdates: Bool
+            let achievementAlerts: Bool
+            let skillLevelUpdates: Bool
             let email: Bool
             let push: Bool
             let sms: Bool

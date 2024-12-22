@@ -27,6 +27,21 @@ enum FirebaseError: Error {
 
 final class FirebaseConfig: NSObject {
     static let shared = FirebaseConfig()
+    
+    // MARK: - Configuration Values
+    static let fcmServerKey = "YOUR_FCM_SERVER_KEY"
+    static let projectId = "YOUR_PROJECT_ID"
+    
+    static var fcmApiUrl: String {
+        "https://fcm.googleapis.com/v1/projects/\(projectId)/messages:send"
+    }
+    
+    // MARK: - Debug Validation
+    static func validateConfiguration() {
+        assert(fcmServerKey != "YOUR_FCM_SERVER_KEY", "Please set the FCM Server Key in FirebaseConfig.swift")
+        assert(projectId != "YOUR_PROJECT_ID", "Please set the Project ID in FirebaseConfig.swift")
+    }
+    
     private override init() {
         super.init()
     }

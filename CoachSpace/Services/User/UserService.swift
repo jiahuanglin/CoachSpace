@@ -14,6 +14,8 @@ protocol UserServiceProtocol {
     func searchUsers(query: String) async throws -> [User]
     func addAchievement(_ achievement: User.UserStats.Achievement, for userId: String) async throws
     func updateSkillLevel(_ skillLevel: User.UserStats.SkillLevel, for userId: String) async throws
+    func getUsers(ids: [String]) async throws -> [User]
+    func getAllUsers() async throws -> [User]
 }
 
 final class UserService: UserServiceProtocol {
@@ -42,6 +44,25 @@ final class UserService: UserServiceProtocol {
                 print("NSError domain: \(nsError.domain), code: \(nsError.code)")
                 print("Debug description: \(nsError.debugDescription)")
             }
+            throw UserError.fetchFailed(error)
+        }
+    }
+    
+    func getUsers(ids: [String]) async throws -> [User] {
+        var users: [User] = []
+        for id in ids {
+            if let user = try await getUser(id: id) {
+                users.append(user)
+            }
+        }
+        return users
+    }
+    
+    func getAllUsers() async throws -> [User] {
+        do {
+            let snapshot = try await db.collection("users").getDocuments()
+            return snapshot.documents.compactMap { User.from($0) }
+        } catch {
             throw UserError.fetchFailed(error)
         }
     }

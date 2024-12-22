@@ -36,16 +36,28 @@ final class MessagingService: MessagingServiceProtocol {
     private let storage = StorageService.shared
     
     private init() {
+        print("MessagingService: Initializing")
+        print("MessagingService: Firestore instance: \(db != nil)")
+        print("MessagingService: StorageService instance: \(storage != nil)")
         setupPresenceMonitoring()
+        print("MessagingService: Presence monitoring setup completed")
     }
     
     // MARK: - Chat Room Operations
     
     func getChatRoom(id: String) async throws -> ChatRoom? {
         do {
+            print("MessagingService: Getting chat room with ID: \(id)")
             let doc = try await db.collection("chatRooms").document(id).getDocument()
-            return ChatRoom.from(doc)
+            print("MessagingService: Document exists: \(doc.exists)")
+            if doc.exists {
+                print("MessagingService: Document data: \(doc.data() ?? [:])")
+            }
+            let chatRoom = ChatRoom.from(doc)
+            print("MessagingService: Chat room found: \(chatRoom != nil)")
+            return chatRoom
         } catch {
+            print("MessagingService: Error getting chat room: \(error)")
             throw MessagingError.fetchFailed(error)
         }
     }
@@ -59,6 +71,8 @@ final class MessagingService: MessagingServiceProtocol {
                 lastMessage: nil,
                 classId: nil,
                 type: type,
+                name: name,
+                imageURL: imageURL,
                 createdAt: Date(),
                 updatedAt: Date()
             )
@@ -470,6 +484,7 @@ final class MessagingService: MessagingServiceProtocol {
     // MARK: - Real-time Subscriptions
     
     func observeChatRooms(for userId: String) -> AnyPublisher<[ChatRoom], Error> {
+        print("MessagingService: Starting to observe chat rooms for user: \(userId)")
         let query = db.collection("userChatRooms")
             .document(userId)
             .collection("rooms")
@@ -477,15 +492,25 @@ final class MessagingService: MessagingServiceProtocol {
         
         return Publishers.QuerySnapshotPublisher(query: query)
             .flatMap { [weak self] snapshot -> AnyPublisher<[ChatRoom], Error> in
+                print("MessagingService: Received userChatRooms snapshot with \(snapshot.documents.count) documents")
+                for doc in snapshot.documents {
+                    print("MessagingService: Document ID: \(doc.documentID)")
+                    print("MessagingService: Document data: \(doc.data())")
+                }
+                
                 guard let self = self else {
+                    print("MessagingService: Self is nil")
                     return Just([])
                         .setFailureType(to: Error.self)
                         .eraseToAnyPublisher()
                 }
                 
                 let chatRoomIds = snapshot.documents.compactMap { doc in
-                    doc.data()["chatRoomId"] as? String
+                    let chatRoomId = doc.data()["chatRoomId"] as? String
+                    print("MessagingService: Extracted chatRoomId: \(chatRoomId ?? "nil")")
+                    return chatRoomId
                 }
+                print("MessagingService: Found chat room IDs: \(chatRoomIds)")
                 
                 return self.fetchChatRooms(ids: chatRoomIds)
             }
@@ -493,6 +518,7 @@ final class MessagingService: MessagingServiceProtocol {
     }
     
     func observeMessages(in chatRoomId: String) -> AnyPublisher<[Message], Error> {
+        print("MessagingService: Starting to observe messages in chat room: \(chatRoomId)")
         let query = db.collection("chatRooms")
             .document(chatRoomId)
             .collection("messages")
@@ -501,7 +527,9 @@ final class MessagingService: MessagingServiceProtocol {
         
         return Publishers.QuerySnapshotPublisher(query: query)
             .map { snapshot in
-                snapshot.documents.compactMap { Message.from($0) }
+                let messages = snapshot.documents.compactMap { Message.from($0) }
+                print("MessagingService: Received \(messages.count) messages for chat room \(chatRoomId)")
+                return messages
             }
             .eraseToAnyPublisher()
     }
@@ -584,13 +612,16 @@ final class MessagingService: MessagingServiceProtocol {
     }
     
     private func fetchChatRooms(ids: [String]) -> AnyPublisher<[ChatRoom], Error> {
+        print("MessagingService: Fetching chat rooms for IDs: \(ids)")
         let publishers = ids.map { id in
             Future<ChatRoom?, Error> { [weak self] promise in
                 Task {
                     do {
                         let chatRoom = try await self?.getChatRoom(id: id)
+                        print("MessagingService: Fetched chat room \(id): \(chatRoom != nil)")
                         promise(.success(chatRoom))
                     } catch {
+                        print("MessagingService: Error fetching chat room \(id): \(error)")
                         promise(.failure(error))
                     }
                 }
@@ -600,6 +631,10 @@ final class MessagingService: MessagingServiceProtocol {
         return Publishers.MergeMany(publishers)
             .compactMap { $0 }
             .collect()
+            .map { rooms in
+                print("MessagingService: Collected \(rooms.count) chat rooms")
+                return rooms
+            }
             .eraseToAnyPublisher()
     }
 }

@@ -6,6 +6,19 @@ struct HomeView: View {
     @State private var showingFilters = false
     @State private var scrollOffset: CGFloat = 0
     
+    var searchSection: some View {
+        SearchBar(
+            text: $searchText,
+            placeholder: "Search classes or coaches",
+            onSearch: {
+                // Implement search
+            },
+            onCancel: {
+                // Handle cancel
+            }
+        )
+    }
+    
     var body: some View {
         ZStack {
             // Background gradient
@@ -125,7 +138,7 @@ struct HomeView: View {
             }
             .overlay(
                 // Search Bar
-                SearchBar(text: $searchText)
+                searchSection
                     .padding(.horizontal)
                     .padding(.top, 8)
                 ,
@@ -133,30 +146,6 @@ struct HomeView: View {
             )
         }
         .navigationBarHidden(true)
-    }
-}
-
-struct SearchBar: View {
-    @Binding var text: String
-    
-    var body: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.gray)
-            
-            TextField("Search classes, instructors, or venues", text: $text)
-            
-            if !text.isEmpty {
-                Button(action: { text = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
     }
 }
 

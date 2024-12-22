@@ -17,6 +17,9 @@ service cloud.firestore {
       // Allow users to read and write their own data
       allow read, write: if isOwner(userId);
       
+      // Allow reading basic user info for chat functionality
+      allow list: if isAuthenticated();
+      
       // Allow reading instructor profiles
       allow read: if isAuthenticated() && 
         get(/databases/$(database)/documents/users/$(userId)).data.role == 'instructor';
@@ -50,6 +53,42 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && 
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Chat rooms collection rules
+    match /chatRooms/{roomId} {
+      allow read, write: if isAuthenticated() &&
+        request.resource.data.participants.hasAny([request.auth.uid]);
+    }
+    
+    // User chat rooms collection rules
+    match /userChatRooms/{userId}/rooms/{roomId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) || 
+        get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants.hasAny([request.auth.uid])
+      );
+      allow write: if isAuthenticated() && (
+        isOwner(userId) && 
+        get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants.hasAny([request.auth.uid])
+      );
+    }
+    
+    // Presence collection rules
+    match /presence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // Messages collection rules
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() &&
+        get(/databases/$(database)/documents/chatRooms/$(resource.data.chatRoomId)).data.participants.hasAny([request.auth.uid]);
+      allow create: if isAuthenticated() &&
+        get(/databases/$(database)/documents/chatRooms/$(request.resource.data.chatRoomId)).data.participants.hasAny([request.auth.uid]);
+      allow update: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        get(/databases/$(database)/documents/chatRooms/$(resource.data.chatRoomId)).data.participants.hasAny([request.auth.uid])
+      );
     }
   }
 } 
